@@ -8,11 +8,6 @@ on:
         required: true
         default: "istoreos-25.12"
         type: string
-      build_id:
-        description: "N1 firmware build ID used for the base config"
-        required: true
-        default: "2026110611"
-        type: string
 
 permissions:
   contents: read
@@ -38,12 +33,10 @@ jobs:
 
       - name: Download the matching N1 build config
         working-directory: istoreos
-        env:
-          BUILD_ID: ${{ inputs.build_id }}
         run: |
           set -eu
           CONFIG_URL="https://fw20.koolcenter.com/iStoreOS/alpha/n1/config.seed"
-          echo "Downloading N1 config seed for firmware build: ${BUILD_ID}"
+          echo "Downloading the currently published N1 config seed"
           curl -fL --retry 3 --retry-delay 2 "$CONFIG_URL" -o .config
           test -s .config
           echo "===== N1 target selection in source config ====="
