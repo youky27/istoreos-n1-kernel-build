@@ -14,9 +14,9 @@ permissions:
 
 jobs:
   prepare:
-    name: Validate N1 kernel options (no compile)
+    name: Validate N1 kernel options (no kernel compile)
     runs-on: ubuntu-22.04
-    timeout-minutes: 30
+    timeout-minutes: 60
     steps:
       - name: Checkout iStoreOS source
         uses: actions/checkout@v4
@@ -29,7 +29,7 @@ jobs:
       - name: Install configuration dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential gawk gettext git libncurses-dev libssl-dev perl python3 rsync unzip zlib1g-dev file wget curl ca-certificates
+          sudo apt-get install -y build-essential bc bison flex gawk gettext git libelf-dev libncurses-dev libssl-dev perl python3 rsync unzip zlib1g-dev file wget curl ca-certificates
 
       - name: Download the matching N1 build config
         working-directory: istoreos
@@ -69,10 +69,98 @@ jobs:
           done
           cp .config ../n1-kernel-config.preview
 
-      - name: Upload validated config preview
+      - name: Prepare patched Linux source (no compile)
+        working-directory: istoreos
+        run: |
+          set -eu
+          make target/linux/prepare V=s
+
+      - name: Generate and verify final Linux kernel config (no kernel compile)
+        working-directory: istoreos
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # Read the exact paths and Kconfig merge command from the N1 target Makefile.
+          mapfile -t kernel_vars < <(
+            make --no-print-directory -s -C target/linux/amlogic \
+              --eval='print-kernel-vars:;@printf "%s\\n" "$(LINUX_DIR)" "$(LINUX_CONF_CMD)" "$(TMP_DIR)" "$(KERNEL_PATCHVER)"' \
+              print-kernel-vars
+          )
+
+          if [ "${#kernel_vars[@]}" -ne 4 ]; then
+            echo "::error::Could not resolve the Linux kernel build variables."
+            printf '%s\\n' "${kernel_vars[@]}"
+            exit 1
+          fi
+
+          LINUX_DIR="${kernel_vars[0]}"
+          LINUX_CONF_CMD="${kernel_vars[1]}"
+          TMP_DIR="${kernel_vars[2]}"
+          KERNEL_PATCHVER="${kernel_vars[3]}"
+
+          echo "Linux source directory: $LINUX_DIR"
+          echo "Kernel patch version: $KERNEL_PATCHVER"
+          test -d "$LINUX_DIR"
+
+          # The official Kernel/Configure recipe uses this package metadata file.
+          if [ ! -s "$TMP_DIR/.packageinfo" ]; then
+            make package-metadata
+          fi
+          test -s "$TMP_DIR/.packageinfo"
+
+          # Reproduce the configuration-generation portion of
+          # include/kernel-defaults.mk:Kernel/Configure/Default.
+          eval "$LINUX_CONF_CMD > \"$LINUX_DIR/.config.target\""
+
+          awk '/^(#[[:space:]]+)?CONFIG_KERNEL/{sub("CONFIG_KERNEL_","CONFIG_");print}' .config \
+            >> "$LINUX_DIR/.config.target"
+
+          echo "# CONFIG_KALLSYMS_EXTRA_PASS is not set" >> "$LINUX_DIR/.config.target"
+          echo "# CONFIG_KALLSYMS_ALL is not set" >> "$LINUX_DIR/.config.target"
+          echo "CONFIG_KALLSYMS_UNCOMPRESSED=y" >> "$LINUX_DIR/.config.target"
+
+          ./scripts/package-metadata.pl kconfig "$TMP_DIR/.packageinfo" .config "$KERNEL_PATCHVER" \
+            > "$LINUX_DIR/.config.override"
+
+          ./scripts/kconfig.pl 'm+' '+' "$LINUX_DIR/.config.target" /dev/null \
+            "$LINUX_DIR/.config.override" > "$LINUX_DIR/.config.set"
+
+          mv "$LINUX_DIR/.config.set" "$LINUX_DIR/.config.old"
+          grep -v INITRAMFS "$LINUX_DIR/.config.old" > "$LINUX_DIR/.config.set"
+          echo 'CONFIG_INITRAMFS_SOURCE=""' >> "$LINUX_DIR/.config.set"
+          echo '# CONFIG_INITRAMFS_FORCE is not set' >> "$LINUX_DIR/.config.set"
+          echo "# CONFIG_INITRAMFS_PRESERVE_MTIME is not set" >> "$LINUX_DIR/.config.set"
+
+          # Kconfig olddefconfig resolves dependencies and writes the real kernel .config.
+          cp "$LINUX_DIR/.config.set" "$LINUX_DIR/.config"
+          make -C "$LINUX_DIR" ARCH=arm64 olddefconfig
+
+          echo "===== Final Linux kernel config ====="
+          grep -E '^CONFIG_(FTRACE|FUNCTION_TRACER|DYNAMIC_FTRACE)=y$' "$LINUX_DIR/.config"
+
+          for option in FTRACE FUNCTION_TRACER DYNAMIC_FTRACE; do
+            if ! grep -qx "CONFIG_${option}=y" "$LINUX_DIR/.config"; then
+              echo "::error::Final kernel config does not contain CONFIG_${option}=y."
+              grep -E "^(# )?CONFIG_${option}" "$LINUX_DIR/.config" || true
+              exit 1
+            fi
+          done
+
+          cp "$LINUX_DIR/.config" ../n1-linux-kernel.config.preview
+
+      - name: Upload validated OpenWrt config preview
         uses: actions/upload-artifact@v4
         with:
           name: n1-kernel-config-preview
           path: n1-kernel-config.preview
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload final Linux kernel config preview
+        uses: actions/upload-artifact@v4
+        with:
+          name: n1-linux-kernel-config-preview
+          path: n1-linux-kernel.config.preview
           if-no-files-found: error
           retention-days: 14
