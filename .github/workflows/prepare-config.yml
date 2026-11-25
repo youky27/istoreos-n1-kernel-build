@@ -50,10 +50,15 @@ jobs:
         working-directory: istoreos
         run: |
           set -eu
-          ./scripts/config --file .config --enable KERNEL_FTRACE
-          ./scripts/config --file .config --enable KERNEL_FUNCTION_TRACER
-          ./scripts/config --file .config --enable KERNEL_DYNAMIC_FTRACE
+          # OpenWrt's scripts/config is a source directory, not an executable.
+          # Set the three Kconfig symbols in the seed before resolving dependencies.
+          for option in KERNEL_FTRACE KERNEL_FUNCTION_TRACER KERNEL_DYNAMIC_FTRACE; do
+            sed -i -e "/^CONFIG_${option}=/d" -e "/^# CONFIG_${option} is not set$/d" .config
+            printf 'CONFIG_%s=y\n' "$option" >> .config
+          done
+
           make defconfig
+
           echo "===== Verified OpenWrt build config ====="
           grep -E '^CONFIG_KERNEL_(FTRACE|FUNCTION_TRACER|DYNAMIC_FTRACE)=y$' .config
           for option in KERNEL_FTRACE KERNEL_FUNCTION_TRACER KERNEL_DYNAMIC_FTRACE; do
