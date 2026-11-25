@@ -80,8 +80,10 @@ jobs:
         working-directory: istoreos
         run: |
           set -eu
-          make package-metadata V=s
+          # OpenWrt/iStoreOS generates package metadata via prepare-tmpinfo.
+          make prepare-tmpinfo V=s
           test -s tmp/.packageinfo
+          test -s tmp/.packagedeps
 
       - name: Compile N1 kernel, modules and device trees (no install)
         working-directory: istoreos
