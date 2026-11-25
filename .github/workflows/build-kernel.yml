@@ -127,7 +127,7 @@ jobs:
 
           mkdir -p ../n1-kernel-build-output/modules
           find "$LINUX_DIR" -type f -name '*.ko' \
-            -exec cp --parents {} ../n1-kernel-build-output/modules/ \
+            -exec cp --parents {} ../n1-kernel-build-output/modules/ \;
 
           echo "===== Kernel build output ====="
           find ../n1-kernel-build-output -type f -printf '%p %s bytes\n' | sort
