@@ -1,0 +1,80 @@
+name: Prepare N1 kernel config
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: "iStoreOS source branch or tag"
+        required: true
+        default: "istoreos-25.12"
+        type: string
+      build_id:
+        description: "N1 firmware build ID used for the base config"
+        required: true
+        default: "2026110611"
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  prepare:
+    name: Validate N1 kernel options (no compile)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout iStoreOS source
+        uses: actions/checkout@v4
+        with:
+          repository: istoreos/istoreos
+          ref: ${{ inputs.source_ref }}
+          path: istoreos
+          fetch-depth: 1
+
+      - name: Install configuration dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential gawk gettext git libncurses-dev libssl-dev perl python3 rsync unzip zlib1g-dev file wget curl ca-certificates
+
+      - name: Download the matching N1 build config
+        working-directory: istoreos
+        env:
+          BUILD_ID: ${{ inputs.build_id }}
+        run: |
+          set -eu
+          CONFIG_URL="https://fw20.koolcenter.com/iStoreOS/alpha/n1/config.seed"
+          echo "Downloading N1 config seed for firmware build: ${BUILD_ID}"
+          curl -fL --retry 3 --retry-delay 2 "$CONFIG_URL" -o .config
+          test -s .config
+          echo "===== N1 target selection in source config ====="
+          grep -Ei 'TARGET.*(amlogic|meson|phicomm_n1)' .config | head -40 || true
+          if ! grep -qi 'phicomm_n1' .config; then
+            echo "::error::The downloaded config seed does not appear to select the Phicomm N1 profile."
+            exit 1
+          fi
+
+      - name: Enable Function Tracer and Dynamic Ftrace
+        working-directory: istoreos
+        run: |
+          set -eu
+          ./scripts/config --file .config --enable KERNEL_FTRACE
+          ./scripts/config --file .config --enable KERNEL_FUNCTION_TRACER
+          ./scripts/config --file .config --enable KERNEL_DYNAMIC_FTRACE
+          make defconfig
+          echo "===== Verified OpenWrt build config ====="
+          grep -E '^CONFIG_KERNEL_(FTRACE|FUNCTION_TRACER|DYNAMIC_FTRACE)=y$' .config
+          for option in KERNEL_FTRACE KERNEL_FUNCTION_TRACER KERNEL_DYNAMIC_FTRACE; do
+            if ! grep -qx "CONFIG_${option}=y" .config; then
+              echo "::error::CONFIG_${option} did not remain enabled after make defconfig."
+              exit 1
+            fi
+          done
+          cp .config ../n1-kernel-config.preview
+
+      - name: Upload validated config preview
+        uses: actions/upload-artifact@v4
+        with:
+          name: n1-kernel-config-preview
+          path: n1-kernel-config.preview
+          if-no-files-found: error
+          retention-days: 14
