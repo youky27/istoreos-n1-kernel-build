@@ -83,7 +83,7 @@ jobs:
 
           # Read the exact paths and Kconfig merge command from the N1 target Makefile.
           mapfile -t kernel_vars < <(
-            make --no-print-directory -s -C target/linux/amlogic \
+            make --no-print-directory -s -C target/linux/amlogic TOPDIR="$GITHUB_WORKSPACE/istoreos" \
               --eval='print-kernel-vars:;@printf "%s\\n" "$(LINUX_DIR)" "$(LINUX_CONF_CMD)" "$(TMP_DIR)" "$(KERNEL_PATCHVER)"' \
               print-kernel-vars
           )
