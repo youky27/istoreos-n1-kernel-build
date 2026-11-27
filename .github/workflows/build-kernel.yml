@@ -80,22 +80,22 @@ jobs:
           # Use the running N1 kernel config as the base, then let platform
           # fragments override it, followed by normal iStoreOS/package settings.
           python3 - "$DEFAULTS" <<'PY'
-import pathlib
-import sys
+          import pathlib
+          import sys
 
-path = pathlib.Path(sys.argv[1])
-content = path.read_text()
-needle = "\t$(LINUX_CONF_CMD) > $(LINUX_DIR)/.config.target\n"
-replacement = needle + (
-    "\t$(SCRIPT_DIR)/kconfig.pl + $(TOPDIR)/../configs/n1-current-kernel.config "
-    "$(LINUX_DIR)/.config.target > $(LINUX_DIR)/.config.target.baseline\n"
-    "\tmv $(LINUX_DIR)/.config.target.baseline $(LINUX_DIR)/.config.target\n"
-)
-if content.count(needle) != 1:
-    raise SystemExit("Expected exactly one Kernel/Configure baseline insertion point")
-path.write_text(content.replace(needle, replacement))
-print("Patched kernel-defaults.mk: current N1 config is now the kernel baseline")
-PY
+          path = pathlib.Path(sys.argv[1])
+          content = path.read_text()
+          needle = "\t$(LINUX_CONF_CMD) > $(LINUX_DIR)/.config.target\n"
+          replacement = needle + (
+              "\t$(SCRIPT_DIR)/kconfig.pl + $(TOPDIR)/../configs/n1-current-kernel.config "
+              "$(LINUX_DIR)/.config.target > $(LINUX_DIR)/.config.target.baseline\n"
+              "\tmv $(LINUX_DIR)/.config.target.baseline $(LINUX_DIR)/.config.target\n"
+          )
+          if content.count(needle) != 1:
+              raise SystemExit("Expected exactly one Kernel/Configure baseline insertion point")
+          path.write_text(content.replace(needle, replacement))
+          print("Patched kernel-defaults.mk: current N1 config is now the kernel baseline")
+          PY
 
       - name: Prepare patched Linux source
         working-directory: istoreos
@@ -158,25 +158,25 @@ PY
           cp "$LINUX_DIR/arch/arm64/boot/Image" ../n1-kernel-build-output/Image
 
           python3 - "$GITHUB_WORKSPACE/configs/n1-current-kernel.config" "$LINUX_DIR/.config" > ../n1-kernel-build-output/kernel-config-diff.txt <<'PY'
-import re
-import sys
+          import re
+          import sys
 
-def read_config(path):
-    values = {}
-    for line in open(path, encoding="utf-8"):
-        m = re.match(r"^(?:# )?CONFIG_(\w+)(?:=(.*)| is not set)$", line.rstrip())
-        if m:
+          def read_config(path):
+              values = {}
+              for line in open(path, encoding="utf-8"):
+                  m = re.match(r"^(?:# )?CONFIG_(\w+)(?:=(.*)| is not set)$", line.rstrip())
+                  if m:
             values[m.group(1)] = m.group(2) if m.group(2) is not None else "n"
-    return values
+              return values
 
-before, after = map(read_config, sys.argv[1:])
-changed = [(key, before.get(key, "<unset>"), after.get(key, "<unset>"))
+          before, after = map(read_config, sys.argv[1:])
+          changed = [(key, before.get(key, "<unset>"), after.get(key, "<unset>"))
            for key in sorted(set(before) | set(after))
            if before.get(key, "<unset>") != after.get(key, "<unset>")]
-print(f"Current kernel config -> final build config: {len(changed)} changed symbols")
-for key, old, new in changed:
-    print(f"{key}: {old} -> {new}")
-PY
+          print(f"Current kernel config -> final build config: {len(changed)} changed symbols")
+          for key, old, new in changed:
+              print(f"{key}: {old} -> {new}")
+          PY
 
           for file in vmlinux System.map Module.symvers modules.builtin modules.order; do
             if [ -s "$LINUX_DIR/$file" ]; then
