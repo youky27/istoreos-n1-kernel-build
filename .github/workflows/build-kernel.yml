@@ -26,6 +26,12 @@ jobs:
           path: istoreos
           fetch-depth: 1
 
+      - name: Checkout kernel config baseline
+        uses: actions/checkout@v4
+        with:
+          path: build-config
+          fetch-depth: 1
+
       - name: Install build dependencies
         run: |
           sudo apt-get update
@@ -68,7 +74,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          BASELINE="$GITHUB_WORKSPACE/configs/n1-current-kernel.config"
+          BASELINE="$GITHUB_WORKSPACE/build-config/configs/n1-current-kernel.config"
           DEFAULTS="include/kernel-defaults.mk"
 
           test -s "$BASELINE"
@@ -85,15 +91,18 @@ jobs:
 
           path = pathlib.Path(sys.argv[1])
           content = path.read_text()
-          needle = "\t$(LINUX_CONF_CMD) > $(LINUX_DIR)/.config.target\n"
-          replacement = needle + (
-              "\t$(SCRIPT_DIR)/kconfig.pl + $(TOPDIR)/../configs/n1-current-kernel.config "
+          marker = "# copy CONFIG_KERNEL_* settings over to .config.target"
+          insertion = (
+              "\t$(SCRIPT_DIR)/kconfig.pl + $(TOPDIR)/../build-config/configs/n1-current-kernel.config "
               "$(LINUX_DIR)/.config.target > $(LINUX_DIR)/.config.target.baseline\n"
               "\tmv $(LINUX_DIR)/.config.target.baseline $(LINUX_DIR)/.config.target\n"
           )
-          if content.count(needle) != 1:
-              raise SystemExit("Expected exactly one Kernel/Configure baseline insertion point")
-          path.write_text(content.replace(needle, replacement))
+          if content.count(marker) != 1:
+              raise SystemExit(
+                  "Expected exactly one CONFIG_KERNEL marker in include/kernel-defaults.mk; "
+                  "cannot safely apply the N1 baseline."
+              )
+          path.write_text(content.replace(marker, insertion + marker))
           print("Patched kernel-defaults.mk: current N1 config is now the kernel baseline")
           PY
 
@@ -154,10 +163,10 @@ jobs:
 
           mkdir -p ../n1-kernel-build-output
           cp "$LINUX_DIR/.config" ../n1-kernel-build-output/kernel.config
-          cp "$GITHUB_WORKSPACE/configs/n1-current-kernel.config" ../n1-kernel-build-output/kernel.config.baseline
+          cp "$GITHUB_WORKSPACE/build-config/configs/n1-current-kernel.config" ../n1-kernel-build-output/kernel.config.baseline
           cp "$LINUX_DIR/arch/arm64/boot/Image" ../n1-kernel-build-output/Image
 
-          python3 - "$GITHUB_WORKSPACE/configs/n1-current-kernel.config" "$LINUX_DIR/.config" > ../n1-kernel-build-output/kernel-config-diff.txt <<'PY'
+          python3 - "$GITHUB_WORKSPACE/build-config/configs/n1-current-kernel.config" "$LINUX_DIR/.config" > ../n1-kernel-build-output/kernel-config-diff.txt <<'PY'
           import re
           import sys
 
