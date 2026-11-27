@@ -63,6 +63,40 @@ jobs:
           echo "===== Selected N1 target ====="
           grep -E '^CONFIG_TARGET_(amlogic|amlogic_meson|DEVICE_amlogic_meson_DEVICE_phicomm_n1)=y$' .config
 
+      - name: Apply current N1 kernel config as build baseline
+        working-directory: istoreos
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASELINE="$GITHUB_WORKSPACE/configs/n1-current-kernel.config"
+          DEFAULTS="include/kernel-defaults.mk"
+
+          test -s "$BASELINE"
+          grep -qx '# Linux/arm64 6.12.112 Kernel Configuration' "$BASELINE"
+          grep -qx 'CONFIG_FTRACE=y' "$BASELINE"
+          grep -qx 'CONFIG_DEBUG_INFO_BTF=y' "$BASELINE"
+
+          # iStoreOS first merges platform kernel fragments into .config.target.
+          # Use the running N1 kernel config as the base, then let platform
+          # fragments override it, followed by normal iStoreOS/package settings.
+          python3 - "$DEFAULTS" <<'PY'
+import pathlib
+import sys
+
+path = pathlib.Path(sys.argv[1])
+content = path.read_text()
+needle = "\t$(LINUX_CONF_CMD) > $(LINUX_DIR)/.config.target\n"
+replacement = needle + (
+    "\t$(SCRIPT_DIR)/kconfig.pl + $(TOPDIR)/../configs/n1-current-kernel.config "
+    "$(LINUX_DIR)/.config.target > $(LINUX_DIR)/.config.target.baseline\n"
+    "\tmv $(LINUX_DIR)/.config.target.baseline $(LINUX_DIR)/.config.target\n"
+)
+if content.count(needle) != 1:
+    raise SystemExit("Expected exactly one Kernel/Configure baseline insertion point")
+path.write_text(content.replace(needle, replacement))
+print("Patched kernel-defaults.mk: current N1 config is now the kernel baseline")
+PY
+
       - name: Prepare patched Linux source
         working-directory: istoreos
         run: |
@@ -104,6 +138,11 @@ jobs:
           test -s "$LINUX_DIR/arch/arm64/boot/Image"
 
           echo "===== Final compiled kernel config ====="
+          grep -qx 'CONFIG_DEBUG_INFO_BTF=y' "$LINUX_DIR/.config" || {
+            echo "::error::Compiled kernel config lost CONFIG_DEBUG_INFO_BTF=y."
+            exit 1
+          }
+
           for option in FTRACE FUNCTION_TRACER DYNAMIC_FTRACE; do
             grep -qx "CONFIG_${option}=y" "$LINUX_DIR/.config" || {
               echo "::error::Compiled kernel config is missing CONFIG_${option}=y."
@@ -115,7 +154,29 @@ jobs:
 
           mkdir -p ../n1-kernel-build-output
           cp "$LINUX_DIR/.config" ../n1-kernel-build-output/kernel.config
+          cp "$GITHUB_WORKSPACE/configs/n1-current-kernel.config" ../n1-kernel-build-output/kernel.config.baseline
           cp "$LINUX_DIR/arch/arm64/boot/Image" ../n1-kernel-build-output/Image
+
+          python3 - "$GITHUB_WORKSPACE/configs/n1-current-kernel.config" "$LINUX_DIR/.config" > ../n1-kernel-build-output/kernel-config-diff.txt <<'PY'
+import re
+import sys
+
+def read_config(path):
+    values = {}
+    for line in open(path, encoding="utf-8"):
+        m = re.match(r"^(?:# )?CONFIG_(\w+)(?:=(.*)| is not set)$", line.rstrip())
+        if m:
+            values[m.group(1)] = m.group(2) if m.group(2) is not None else "n"
+    return values
+
+before, after = map(read_config, sys.argv[1:])
+changed = [(key, before.get(key, "<unset>"), after.get(key, "<unset>"))
+           for key in sorted(set(before) | set(after))
+           if before.get(key, "<unset>") != after.get(key, "<unset>")]
+print(f"Current kernel config -> final build config: {len(changed)} changed symbols")
+for key, old, new in changed:
+    print(f"{key}: {old} -> {new}")
+PY
 
           for file in vmlinux System.map Module.symvers modules.builtin modules.order; do
             if [ -s "$LINUX_DIR/$file" ]; then
