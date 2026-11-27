@@ -166,13 +166,13 @@ jobs:
               for line in open(path, encoding="utf-8"):
                   m = re.match(r"^(?:# )?CONFIG_(\w+)(?:=(.*)| is not set)$", line.rstrip())
                   if m:
-            values[m.group(1)] = m.group(2) if m.group(2) is not None else "n"
+                      values[m.group(1)] = m.group(2) if m.group(2) is not None else "n"
               return values
 
           before, after = map(read_config, sys.argv[1:])
           changed = [(key, before.get(key, "<unset>"), after.get(key, "<unset>"))
-           for key in sorted(set(before) | set(after))
-           if before.get(key, "<unset>") != after.get(key, "<unset>")]
+                     for key in sorted(set(before) | set(after))
+                     if before.get(key, "<unset>") != after.get(key, "<unset>")]
           print(f"Current kernel config -> final build config: {len(changed)} changed symbols")
           for key, old, new in changed:
               print(f"{key}: {old} -> {new}")
