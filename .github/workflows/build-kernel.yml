@@ -8,6 +8,11 @@ on:
         required: true
         default: "istoreos-25.12"
         type: string
+      validate_only:
+        description: "Only validate the N1 kernel config baseline; do not compile"
+        required: true
+        default: true
+        type: boolean
 
 permissions:
   contents: read
@@ -107,12 +112,14 @@ jobs:
           PY
 
       - name: Prepare patched Linux source
+        if: ${{ !inputs.validate_only }}
         working-directory: istoreos
         run: |
           set -eu
           make target/linux/prepare V=s
 
       - name: Build host tools and N1 toolchain
+        if: ${{ !inputs.validate_only }}
         working-directory: istoreos
         run: |
           set -eu
@@ -120,6 +127,7 @@ jobs:
           make -j2 tools/install toolchain/install V=s
 
       - name: Generate package metadata
+        if: ${{ !inputs.validate_only }}
         working-directory: istoreos
         run: |
           set -eu
@@ -129,12 +137,14 @@ jobs:
           test -s tmp/.packagedeps
 
       - name: Compile N1 kernel, modules and device trees (no install)
+        if: ${{ !inputs.validate_only }}
         working-directory: istoreos
         run: |
           set -eu
           make -j2 target/linux/compile V=s
 
       - name: Verify kernel config and collect build outputs
+        if: ${{ !inputs.validate_only }}
         working-directory: istoreos
         shell: bash
         run: |
@@ -207,6 +217,7 @@ jobs:
           test -s ../n1-kernel-build-output/kernel.config
 
       - name: Upload N1 kernel build artifacts
+        if: ${{ !inputs.validate_only }}
         uses: actions/upload-artifact@v4
         with:
           name: n1-linux-6.12.112-ftrace-build
